@@ -2,11 +2,8 @@ cmake_minimum_required(VERSION 3.14)
 project(video-app C CXX)
 set(CMAKE_CXX_STANDARD 20)
 
-find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
-
-add_subdirectory(lib/glfw)
 add_subdirectory(lib/FFmpeg)
+find_package(raylib REQUIRED)
 
 add_definitions(-DGL_SILENCE_DEPRECATION)
 
@@ -16,7 +13,16 @@ list(APPEND SOURCES
 
 add_executable(video-app MACOSX_BUNDLE WIN32 ${SOURCES}
         src/test.h
-        src/test.cpp)
+        src/test.cpp
+        src/define.h
+        src/extension.h
+        src/extension.cpp
+        src/Bar.cpp
+        src/Bar.h
+        src/plug.cpp
+        src/plug.h
+        src/helpers.h
+)
 
 if(APPLE)
     list(APPEND EXTRA_LIBS
@@ -43,4 +49,9 @@ else()
     )
 endif()
 
-target_link_libraries(video-app FFmpeg glfw ${EXTRA_LIBS} ${OpenCV_LIBS})
+target_link_libraries(video-app
+    FFmpeg
+    ${EXTRA_LIBS}
+    fftw3
+    raylib
+)
