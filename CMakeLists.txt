@@ -14,7 +14,9 @@ list(APPEND SOURCES
     src/main.cpp
 )
 
-add_executable(video-app MACOSX_BUNDLE WIN32 ${SOURCES})
+add_executable(video-app MACOSX_BUNDLE WIN32 ${SOURCES}
+        src/test.h
+        src/test.cpp)
 
 if(APPLE)
     list(APPEND EXTRA_LIBS
