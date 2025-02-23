@@ -1,94 +1,114 @@
-#include <string>
-
-#include "Bar.h"
-#include "define.h"
-#include "extension.h"
-#include "raylib.h"
-#include <iostream>
-
-extern "C" {
-#include <libavformat/avformat.h>
-#include <libavcodec/avcodec.h>
+#include <raylib.h>
 #include <fftw3.h>
-}
+#include <vector>
+#include <fstream>
+#include <iostream>
+#include <cmath>
 
-void print(const Color color) {
-    printf("Color(%d, %d, %d, %d)\n", color.r, color.g, color.b, color.a);
-}
+#include "draw.h"
 
-void drawBars(const Bar *bars, const int count, const int maxWidth, const int maxHeight, const int barSpacing) {
-    const int barWidth = (maxWidth - (count - 1) * barSpacing) / count;
+#define SAMPLE_RATE 44100
+#define FFT_SIZE 1024
+#define BAR_COUNT 64
+#define SMOOTHING_FACTOR 0.2f
 
-    for (int i = 0; i < count; i++) {
-        const int x = i * (barWidth + barSpacing);
-        const int height = bars[i].getPercent() * maxHeight / Bar::maxPercent;
-        const int y = GetScreenHeight() - height;
-        Color barColor = bars[i].getColor();
-        Color glowColor = Fade(barColor, 0.4f);
 
-        // 🌟 Hiệu ứng phát sáng
-        for (int j = 4; j > 0; j--) {
-            DrawRectangleRounded((Rectangle){x - j, y - j, (float)barWidth + 2*j, (float)height + 2*j}, 0.5f, 6, Fade(glowColor, 0.1f * j));
-        }
+// Tính FFT
+void ComputeFFT(const std::vector<int16_t>& pcmData, size_t offset, std::vector<float>& spectrum)
+{
+    fftw_complex *in, *out;
+    fftw_plan plan;
 
-        // 🎨 Vẽ gradient đẹp hơn
-        DrawRectangleGradientV(x, y, barWidth, height, Fade(barColor, 0.7f), barColor);
+    in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FFT_SIZE);
+    out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FFT_SIZE);
 
-        // 🏆 Viền mượt hơn với bo tròn
-        DrawRectangleRounded((Rectangle){x, y, (float)barWidth, (float)height}, 0.4f, 6, barColor);
-
-        // ✨ Hiệu ứng sáng bóng trên cùng
-        DrawRectangleRounded((Rectangle){x + 2, y + 2, (float)barWidth - 4, (float)(height * 0.3f)}, 0.6f, 6, Fade(WHITE, 0.3f));
-
-        // 🌊 Hiệu ứng động - tạo cảm giác nhịp sóng
-        if (GetTime() - (i * 0.1f) > 0) {
-            int waveOffset = (int)(sin(GetTime() * 4 + i * 0.3) * 6);
-            DrawRectangleRounded((Rectangle){x, y - waveOffset, (float)barWidth, (float)height + waveOffset}, 0.4f, 6, Fade(barColor, 0.9f));
-        }
+    for (int i = 0; i < FFT_SIZE; i++)
+    {
+        int index = offset + i;
+        in[i][0] = index < pcmData.size() ? pcmData[index] / 32768.0f : 0;
+        in[i][1] = 0;
     }
+
+    plan = fftw_plan_dft_1d(FFT_SIZE, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_execute(plan);
+
+    for (int i = 0; i < BAR_COUNT; i++)
+    {
+        int index = i * (FFT_SIZE / 2) / BAR_COUNT;
+        float magnitude = sqrt(out[index][0] * out[index][0] + out[index][1] * out[index][1]);
+
+        spectrum[i] = spectrum[i] * (1 - SMOOTHING_FACTOR) + magnitude * SMOOTHING_FACTOR;
+    }
+
+    fftw_destroy_plan(plan);
+    fftw_free(in);
+    fftw_free(out);
 }
 
+std::vector<int16_t> load_pcm_file(const char* filename)
+{
+    std::ifstream pcmFile(filename, std::ios::binary);
+    if (!pcmFile) {
+        std::cerr << "Không thể mở file " << filename << std::endl;
+        return {};
+    }
 
+    std::vector<int16_t> pcmData;
+    int16_t sample;
+    while (pcmFile.read(reinterpret_cast<char *>(&sample), sizeof(int16_t))) {
+        pcmData.push_back(sample);
+    }
 
-constexpr double updateInterval = 1.0 / 10.0;
-constexpr float lerpSpeed = 0.1f;
-Bar bars[NUM_BARS];
-Bar targetBars[NUM_BARS];
-
-void init() {
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "nullptr");
-    SetTargetFPS(144);
-    for (int i = 0; i < NUM_BARS; i++)
-        bars[i] = getRandBar();
+    printf("PCM data size: %lu\n", pcmData.size());
+    pcmFile.close();
+    return pcmData;
 }
 
-int main() {
-    init();
-    const Font font = LoadFont("assets/JetBrainsMono-Bold.ttf");
+int main(const int argc, char** argv)
+{
+    if (argc < 2)
+    {
+        printf("Usage: %s filename\n", argv[0]);
+        return -1;
+    }
 
+    const std::vector<int16_t> pcmData = load_pcm_file(argv[1]);
+    if (pcmData.empty()) return -1;
 
-    double lastUpdateTime = 0.0;
-    while (!WindowShouldClose()) {
-        if (const double currentTime = GetTime(); currentTime - lastUpdateTime >= updateInterval) {
-            lastUpdateTime = currentTime;
-            for (int i = 0; i < NUM_BARS; i++)
-                targetBars[i] = getRandBar();
-        }
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "FFT Spectrum - Bar");
+    SetTargetFPS(FPS);
+    Font myFont = LoadFontEx("assets/JetBrainsMono-Bold.ttf", 32, nullptr, 0);
+    if (myFont.texture.id == 0) myFont = GetFontDefault();
 
-        for (int i = 0; i < NUM_BARS; i++)
-            bars[i] = extLerp(bars[i], targetBars[i], lerpSpeed);
+    std::vector spectrum(BAR_COUNT, 0.0f);
+    size_t offset = 0;
+
+    while (!WindowShouldClose())
+    {
+        ComputeFFT(pcmData, offset, spectrum);
+
+        offset += FFT_SIZE / 2;
+        if (offset + FFT_SIZE >= pcmData.size()) offset = 0;
 
         BeginDrawing();
-        ClearBackground(RAYWHITE);
+        ClearBackground(BLACK);
 
-        std::string versionText = std::string("FFmpeg version: ") + av_version_info();
-        DrawTextEx(font, versionText.c_str(), {350, 280}, 20, 2, DARKBLUE);
+        // Vẽ dạng bar
+        constexpr float bar_width = static_cast<float>(SCREEN_WIDTH) / static_cast<float>((BAR_COUNT));
+        for (int i = 0; i < BAR_COUNT; i++)
+        {
+            const float x = i * bar_width;
+            const float height = spectrum[i] * 5.0f;
+            const float y = SCREEN_HEIGHT - height;
 
-        drawBars(bars, NUM_BARS, WINDOW_WIDTH, WINDOW_HEIGHT, 10);
+            DrawRectangle(x, y, bar_width - 2, height, BLUE);
+        }
 
+        DrawTextEx(myFont, "NGUYEN DINH PHUC", {50, 50}, 40, 2, WHITE);
         EndDrawing();
     }
 
+    UnloadFont(myFont);
     CloseWindow();
     return 0;
 }

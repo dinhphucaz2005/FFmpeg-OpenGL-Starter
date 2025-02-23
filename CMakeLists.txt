@@ -22,6 +22,10 @@ add_executable(video-app MACOSX_BUNDLE WIN32 ${SOURCES}
         src/plug.cpp
         src/plug.h
         src/helpers.h
+        src/PCM.cpp
+        src/PCM.h
+        src/draw.cpp
+        src/draw.h
 )
 
 if(APPLE)
