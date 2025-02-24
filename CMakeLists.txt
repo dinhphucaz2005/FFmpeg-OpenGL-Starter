@@ -12,20 +12,20 @@ list(APPEND SOURCES
 )
 
 add_executable(video-app MACOSX_BUNDLE WIN32 ${SOURCES}
-        src/test.h
-        src/test.cpp
-        src/define.h
-        src/extension.h
-        src/extension.cpp
-        src/Bar.cpp
-        src/Bar.h
-        src/plug.cpp
-        src/plug.h
-        src/helpers.h
-        src/PCM.cpp
-        src/PCM.h
-        src/draw.cpp
-        src/draw.h
+#        src/test.h
+#        src/test.cpp
+#        src/define.h
+#        src/extension.h
+#        src/extension.cpp
+#        src/Bar.cpp
+#        src/Bar.h
+#        src/plug.cpp
+#        src/plug.h
+#        src/helpers.h
+#        src/PCM.cpp
+#        src/PCM.h
+#        src/draw.cpp
+#        src/draw.h
 )
 
 if(APPLE)

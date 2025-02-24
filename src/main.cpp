@@ -2,42 +2,60 @@
 #include <fftw3.h>
 #include <vector>
 #include <fstream>
-#include <iostream>
 #include <cmath>
+#include <iostream>
+#include <regex>
+#include <bits/atomic_base.h>
 
 #include "draw.h"
+#include "test.h"
 
 #define SAMPLE_RATE 44100
-#define FFT_SIZE 1024
-#define BAR_COUNT 64
-#define SMOOTHING_FACTOR 0.2f
+#define FRAME_SIZE 44100
+#define NUM_BARS 20
+#define SPF 2205 // samples per frame
 
+std::ifstream pcm_file;
+std::vector<int16_t> pcm_buffer(FRAME_SIZE, 0);
 
-// Tính FFT
-void ComputeFFT(const std::vector<int16_t>& pcmData, size_t offset, std::vector<float>& spectrum)
+void read_pcm_frame()
+{
+    if (pcm_file && !pcm_file.eof())
+    {
+        pcm_file.read(reinterpret_cast<char*>(pcm_buffer.data()), FRAME_SIZE * sizeof(int16_t));
+    }
+}
+
+std::vector<int16_t> fft_magnitudes(20, 0);
+
+void compute_fft(std::vector<int16_t>& fft_magnitudes)
 {
     fftw_complex *in, *out;
     fftw_plan plan;
 
-    in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FFT_SIZE);
-    out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FFT_SIZE);
+    in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FRAME_SIZE);
+    out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * FRAME_SIZE);
 
-    for (int i = 0; i < FFT_SIZE; i++)
+    // Chuyển dữ liệu PCM vào FFT input (giữ nguyên raw PCM)
+    for (int i = 0; i < FRAME_SIZE; i++)
     {
-        int index = offset + i;
-        in[i][0] = index < pcmData.size() ? pcmData[index] / 32768.0f : 0;
-        in[i][1] = 0;
+        in[i][0] = pcm_buffer[i]; // Không chuẩn hóa, giữ giá trị gốc
+        in[i][1] = 0.0;
     }
 
-    plan = fftw_plan_dft_1d(FFT_SIZE, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    plan = fftw_plan_dft_1d(FRAME_SIZE, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_execute(plan);
 
-    for (int i = 0; i < BAR_COUNT; i++)
+    float sum = 0;
+    for (int i = 0; i < FRAME_SIZE; i++)
     {
-        int index = i * (FFT_SIZE / 2) / BAR_COUNT;
-        float magnitude = sqrt(out[index][0] * out[index][0] + out[index][1] * out[index][1]);
-
-        spectrum[i] = spectrum[i] * (1 - SMOOTHING_FACTOR) + magnitude * SMOOTHING_FACTOR;
+        const float bien_do = sqrt(pow(out[i][0], 2) + pow(out[i][1], 2));
+        sum += bien_do;
+        if (i % SPF == 0)
+        {
+            fft_magnitudes[i / SPF] = sum;
+            sum = 0;
+        }
     }
 
     fftw_destroy_plan(plan);
@@ -45,70 +63,65 @@ void ComputeFFT(const std::vector<int16_t>& pcmData, size_t offset, std::vector<
     fftw_free(out);
 }
 
-std::vector<int16_t> load_pcm_file(const char* filename)
+
+
+void draw_fft(const std::vector<int16_t>& fft_magnitudes)
 {
-    std::ifstream pcmFile(filename, std::ios::binary);
-    if (!pcmFile) {
-        std::cerr << "Không thể mở file " << filename << std::endl;
-        return {};
+    std::vector<u_int16_t> fft_magnitudes_copy;
+    for (const auto x : fft_magnitudes)
+    {
+        u_int16_t magnitude = static_cast<u_int16_t>(x) + 32768;
+        fft_magnitudes_copy.push_back(magnitude);
     }
 
-    std::vector<int16_t> pcmData;
-    int16_t sample;
-    while (pcmFile.read(reinterpret_cast<char *>(&sample), sizeof(int16_t))) {
-        pcmData.push_back(sample);
+    for (int i = 0; i < NUM_BARS; i++)
+    {
+        const float x = static_cast<float>(i) / NUM_BARS * SCREEN_WIDTH;
+        float height = static_cast<float>(fft_magnitudes_copy[i]) / 65536 * SCREEN_HEIGHT;
+        height = fmin(height, SCREEN_HEIGHT);
+        std::cerr << height << " ";
+        DrawRectangle(x, SCREEN_HEIGHT - height, SCREEN_WIDTH / NUM_BARS, height, RED);
     }
-
-    printf("PCM data size: %lu\n", pcmData.size());
-    pcmFile.close();
-    return pcmData;
+    std::cerr << std::endl;
 }
 
-int main(const int argc, char** argv)
+
+bool load_pcm_file(const std::string& filename)
 {
-    if (argc < 2)
+    pcm_file.open(filename, std::ios::binary);
+    return pcm_file.is_open();
+}
+
+int main(int argc, char** argv)
+{
+    if (!load_pcm_file(argv[1]))
     {
-        printf("Usage: %s filename\n", argv[0]);
+        std::cerr << "Không mở được file PCM!" << std::endl;
         return -1;
     }
 
-    const std::vector<int16_t> pcmData = load_pcm_file(argv[1]);
-    if (pcmData.empty()) return -1;
 
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "FFT Spectrum - Bar");
-    SetTargetFPS(FPS);
-    Font myFont = LoadFontEx("assets/JetBrainsMono-Bold.ttf", 32, nullptr, 0);
-    if (myFont.texture.id == 0) myFont = GetFontDefault();
+    freopen64("test.out", "w", stdout);
+    while (pcm_file && !pcm_file.eof())
+    {
+        pcm_file.read(reinterpret_cast<char*>(pcm_buffer.data()), FRAME_SIZE * sizeof(int16_t));
+        compute_fft(fft_magnitudes);
+    }
 
-    std::vector spectrum(BAR_COUNT, 0.0f);
-    size_t offset = 0;
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Real-Time Audio Visualization");
+    SetTargetFPS(60);
+
 
     while (!WindowShouldClose())
     {
-        ComputeFFT(pcmData, offset, spectrum);
+        ClearBackground(WHITE);
 
-        offset += FFT_SIZE / 2;
-        if (offset + FFT_SIZE >= pcmData.size()) offset = 0;
+        draw_fft(fft_magnitudes);
 
-        BeginDrawing();
-        ClearBackground(BLACK);
-
-        // Vẽ dạng bar
-        constexpr float bar_width = static_cast<float>(SCREEN_WIDTH) / static_cast<float>((BAR_COUNT));
-        for (int i = 0; i < BAR_COUNT; i++)
-        {
-            const float x = i * bar_width;
-            const float height = spectrum[i] * 5.0f;
-            const float y = SCREEN_HEIGHT - height;
-
-            DrawRectangle(x, y, bar_width - 2, height, BLUE);
-        }
-
-        DrawTextEx(myFont, "NGUYEN DINH PHUC", {50, 50}, 40, 2, WHITE);
         EndDrawing();
     }
 
-    UnloadFont(myFont);
     CloseWindow();
+    pcm_file.close();
     return 0;
 }
